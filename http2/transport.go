@@ -485,6 +485,16 @@ func (t *Transport) newUserClientConn(c net.Conn) (*ClientConn, error) {
 
 func (t *Transport) newClientConn(c net.Conn, singleUse bool, internalStateHook func()) (*ClientConn, error) {
 	conf := configFromTransport(t)
+
+	streamRecvWinSize := int32(t.InitialStreamRecvWindowSize)
+	if streamRecvWinSize == 0 {
+		streamRecvWinSize = conf.MaxUploadBufferPerStream
+	}
+	connRecvWinSize := t.InitialConnRecvWindowSize
+	if connRecvWinSize == 0 {
+		connRecvWinSize = uint32(conf.MaxUploadBufferPerConnection)
+	}
+
 	cc := &ClientConn{
 		t:                           t,
 		tconn:                       c,
@@ -492,7 +502,7 @@ func (t *Transport) newClientConn(c net.Conn, singleUse bool, internalStateHook 
 		nextStreamID:                1,
 		maxFrameSize:                16 << 10, // spec default
 		initialWindowSize:           65535,    // spec default
-		initialStreamRecvWindowSize: conf.MaxUploadBufferPerStream,
+		initialStreamRecvWindowSize: streamRecvWinSize,
 		maxConcurrentStreams:        initialMaxConcurrentStreams, // "infinite", per spec. Use a smaller value until we have received server settings.
 		strictMaxConcurrentStreams:  conf.StrictMaxConcurrentRequests,
 		peerMaxHeaderListSize:       0xffffffffffffffff, // "infinite", per spec. Use 2^64-1 instead.
@@ -558,8 +568,8 @@ func (t *Transport) newClientConn(c net.Conn, singleUse bool, internalStateHook 
 
 	cc.bw.Write(clientPreface)
 	cc.fr.WriteSettings(initialSettings...)
-	cc.fr.WriteWindowUpdate(0, uint32(conf.MaxUploadBufferPerConnection))
-	cc.inflow.init(conf.MaxUploadBufferPerConnection + initialWindowSize)
+	cc.fr.WriteWindowUpdate(0, connRecvWinSize)
+	cc.inflow.init(int32(connRecvWinSize) + int32(initialWindowSize))
 	cc.bw.Flush()
 	if cc.werr != nil {
 		cc.Close()

@@ -152,6 +152,14 @@ type Transport struct {
 	// The errType consists of only ASCII word characters.
 	CountError func(errType string)
 
+	// InitialStreamRecvWindowSize is the HTTP/2 stream-level flow control
+	// window size to request from the peer. If zero, a default is used.
+	InitialStreamRecvWindowSize uint32
+
+	// InitialConnRecvWindowSize is the HTTP/2 connection-level flow control
+	// window size to request from the peer. If zero, a default is used.
+
+	InitialConnRecvWindowSize uint32
 	// Internal state, differs between wrapped and non-wrapped implementations.
 	transportInternal
 }
