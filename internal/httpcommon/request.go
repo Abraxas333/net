@@ -49,6 +49,12 @@ type EncodeHeadersParam struct {
 	// DefaultUserAgent is the User-Agent header to send when the request
 	// neither contains a User-Agent nor disables it.
 	DefaultUserAgent string
+
+	// PseudoHeaderOrder, if non-empty, controls the emission
+	// order of HTTP/2 request pseudo-headers. Each character
+	// is one of 'm', 'a', 's', 'p'. See
+	// http2.Transport.PseudoHeaderOrder.
+	PseudoHeaderOrder string
 }
 
 // EncodeHeadersResult is the result of EncodeHeaders.
@@ -130,20 +136,29 @@ func EncodeHeaders(ctx context.Context, param EncodeHeadersParam, headerf func(n
 	}
 
 	enumerateHeaders := func(f func(name, value string)) {
-		// 8.1.2.3 Request Pseudo-Header Fields
-		// The :path pseudo-header field includes the path and query parts of the
-		// target URI (the path-absolute production and optionally a '?' character
-		// followed by the query production, see Sections 3.3 and 3.4 of
-		// [RFC3986]).
-		f(":authority", host)
-		m := req.Method
-		if m == "" {
-			m = "GET"
+		order := param.PseudoHeaderOrder
+		if order == "" {
+			order = "amps"
 		}
-		f(":method", m)
-		if !isNormalConnect {
-			f(":path", path)
-			f(":scheme", req.URL.Scheme)
+		for i := 0; i < len(order); i++ {
+			switch order[i] {
+			case 'a':
+				f(":authority", host)
+			case 'm':
+				m := req.Method
+				if m == "" {
+					m = "GET"
+				}
+				f(":method", m)
+			case 'p':
+				if !isNormalConnect {
+					f(":path", path)
+				}
+			case 's':
+				if !isNormalConnect {
+					f(":scheme", req.URL.Scheme)
+				}
+			}
 		}
 		if protocol != "" {
 			f(":protocol", protocol)

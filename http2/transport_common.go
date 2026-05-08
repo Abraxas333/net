@@ -160,6 +160,36 @@ type Transport struct {
 	// window size to request from the peer. If zero, a default is used.
 
 	InitialConnRecvWindowSize uint32
+
+	// InitialMaxConcurrentStreams, when non-zero, makes the client advertis
+	// SETTINGS_MAX_CONCURRENT_STREAMS in the initial SETTINGS frame.
+	// RFC 9113 §6.5.2 says clients SHOULD NOT advertise it; real Chrome
+	// emits 1000 anyway. Set this only for profiles that should match
+	// Chrome's wire fingerprint. Has no effect unless setting 3 also
+	// appears in InitialSettingsOrder (or InitialSettingsOrder is nil
+	// and a non-zero value is set, in which case it's appended after 4).
+	InitialMaxConcurrentStreams uint32
+
+	// InitialSettingsOrder, if non-nil, specifies the exact set and order
+	// of SETTINGS entries emitted in the initial SETTINGS frame. Entries
+	// with no source value (e.g. SettingMaxConcurrentStreams when
+	// InitialMaxConcurrentStreams==0, or SettingHeaderTableSize when
+	// MaxDecoderHeaderTableSize is at the spec default) are silently
+	// skipped. If nil, Go's default emission behavior is preserved.
+	//
+	// The order is part of the Akamai-style HTTP/2 fingerprint
+	// (S{ID:val;ID:val;...}|WU|priority|HD,order). Real Chrome's order
+	// is [1,2,3,4,6]; Firefox [1,4,5]; tune per stealth profile.
+	InitialSettingsOrder []SettingID
+
+	// PseudoHeaderOrder specifies the emission order for HTTP/2 request
+	// pseudo-headers. Each character is one of 'm' (:method), 'a' (:authori
+	// 's' (:scheme), 'p' (:path). If empty, Go's default ("amps") is used.
+	// Real Chrome uses "masp"; Firefox "mpas"; Safari "msap". The order
+	// appears in the Akamai H2 fingerprint trailer (the part after the
+	// final `|`). Tune per stealth profile.
+	PseudoHeaderOrder string
+
 	// Internal state, differs between wrapped and non-wrapped implementations.
 	transportInternal
 }

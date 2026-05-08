@@ -554,16 +554,61 @@ func (t *Transport) newClientConn(c net.Conn, singleUse bool, internalStateHook 
 		cc.tlsState = &state
 	}
 
-	initialSettings := []Setting{
-		{ID: SettingEnablePush, Val: 0},
-		{ID: SettingInitialWindowSize, Val: uint32(cc.initialStreamRecvWindowSize)},
+	emit := func(id SettingID) (Setting, bool) {
+		switch id {
+		case SettingHeaderTableSize:
+			if maxHeaderTableSize != initialHeaderTableSize {
+				return Setting{
+					ID:  SettingHeaderTableSize,
+					Val: maxHeaderTableSize,
+				}, true
+			}
+		case SettingEnablePush:
+			return Setting{ID: SettingEnablePush, Val: 0}, true
+		case SettingMaxConcurrentStreams:
+			if t.InitialMaxConcurrentStreams != 0 {
+				return Setting{
+					ID:  SettingMaxConcurrentStreams,
+					Val: t.InitialMaxConcurrentStreams,
+				}, true
+			}
+		case SettingInitialWindowSize:
+			return Setting{
+				ID:  SettingInitialWindowSize,
+				Val: uint32(cc.initialStreamRecvWindowSize),
+			}, true
+		case SettingMaxFrameSize:
+			return Setting{
+				ID:  SettingMaxFrameSize,
+				Val: conf.MaxReadFrameSize,
+			}, true
+		case SettingMaxHeaderListSize:
+			if m := t.maxHeaderListSize(); m != 0 {
+				return Setting{
+					ID:  SettingMaxHeaderListSize,
+					Val: m,
+				}, true
+			}
+		}
+		return Setting{}, false
 	}
-	initialSettings = append(initialSettings, Setting{ID: SettingMaxFrameSize, Val: conf.MaxReadFrameSize})
-	if max := t.maxHeaderListSize(); max != 0 {
-		initialSettings = append(initialSettings, Setting{ID: SettingMaxHeaderListSize, Val: max})
+	var initialSettings []Setting
+	order := t.InitialSettingsOrder
+	if order == nil {
+		// Preserve Go's default emission: 2, 4, [3], 5, [6], [1].
+		order = []SettingID{
+			SettingEnablePush,
+			SettingInitialWindowSize,
+			SettingMaxConcurrentStreams,
+			SettingMaxFrameSize,
+			SettingMaxHeaderListSize,
+			SettingHeaderTableSize,
+		}
 	}
-	if maxHeaderTableSize != initialHeaderTableSize {
-		initialSettings = append(initialSettings, Setting{ID: SettingHeaderTableSize, Val: maxHeaderTableSize})
+	for _, id := range order {
+		if s, ok := emit(id); ok {
+			initialSettings = append(initialSettings, s)
+		}
 	}
 
 	cc.bw.Write(clientPreface)
@@ -1269,7 +1314,7 @@ func (cs *clientStream) encodeAndWriteHeaders(req *http.Request) error {
 	// sent by writeRequestBody below, along with any Trailers,
 	// again in form HEADERS{1}, CONTINUATION{0,})
 	cc.hbuf.Reset()
-	res, err := encodeRequestHeaders(req, cs.requestedGzip, cc.peerMaxHeaderListSize, func(name, value string) {
+	res, err := encodeRequestHeaders(req, cs.requestedGzip, cc.peerMaxHeaderListSize, cc.t.PseudoHeaderOrder, func(name, value string) {
 		cc.writeHeader(name, value)
 	})
 	if err != nil {
@@ -1285,7 +1330,7 @@ func (cs *clientStream) encodeAndWriteHeaders(req *http.Request) error {
 	return err
 }
 
-func encodeRequestHeaders(req *http.Request, addGzipHeader bool, peerMaxHeaderListSize uint64, headerf func(name, value string)) (httpcommon.EncodeHeadersResult, error) {
+func encodeRequestHeaders(req *http.Request, addGzipHeader bool, peerMaxHeaderListSize uint64, pseudoOrder string, headerf func(name, value string)) (httpcommon.EncodeHeadersResult, error) {
 	return httpcommon.EncodeHeaders(req.Context(), httpcommon.EncodeHeadersParam{
 		Request: httpcommon.Request{
 			Header:              req.Header,
@@ -1298,6 +1343,7 @@ func encodeRequestHeaders(req *http.Request, addGzipHeader bool, peerMaxHeaderLi
 		AddGzipHeader:         addGzipHeader,
 		PeerMaxHeaderListSize: peerMaxHeaderListSize,
 		DefaultUserAgent:      defaultUserAgent,
+		PseudoHeaderOrder:     pseudoOrder,
 	}, headerf)
 }
 
